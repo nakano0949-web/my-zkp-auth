@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZKP サーバー認証テスト</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; margin-top: 10px; }
+        .log { background: #f4f4f4; padding: 10px; border-radius: 5px; margin-top: 20px; font-size: 0.8em; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+
+    <h2>ZKP認証：サーバー連携</h2>
+    
+    <div id="auth-form">
+        <input type="text" id="username" placeholder="ユーザー名">
+        <input type="password" id="password" placeholder="パスワード">
+        <button onclick="handleSignup()">1. サーバーへ登録</button>
+        <button onclick="handleLogin()" style="background: #28a745;">2. ログイン（ZKP実行）</button>
+    </div>
+
+    <div class="log" id="log-display">ここにログが表示されます...</div>
+
+    <script>
+        // --- 設定 ---
+        const SERVER_URL = "https://my-zkp-auth.onrender.com";
+        const MOD = (2n ** 255n) - 19n;
+        const g = 5n;
+        const h = 7n;
+
+        function log(msg) {
+            const display = document.getElementById('log-display');
+            display.innerText += "\n" + msg;
+            console.log(msg);
+        }
+
+        // 冪剰余計算
+        function modPow(base, exp, mod) {
+            let result = 1n;
+            let b = base % mod;
+            let e = exp;
+            while (e > 0n) {
+                if (e & 1n) result = (result * b) % mod;
+                b = (b * b) % mod;
+                e >>= 1n;
+            }
+            return result;
+        }
+
+        // パスワードから秘密の値と公開値を生成
+        function deriveV(password) {
+            const salt = Math.random().toString(36).substring(2);
+            const v = BigInt(password.length); // 簡易化。本来はハッシュ
+            const com = (modPow(g, v, MOD) * modPow(h, 123n, MOD)) % MOD; // 123nは固定rの例
+            return { salt, v, com };
+        }
+
+        // --- 1. 登録処理 ---
+        async function handleSignup() {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            log(`登録中: ${user}...`);
+
+            const { salt, com } = deriveV(pass);
+
+            try {
+                const res = await fetch(`${SERVER_URL}/api/signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: user, salt, com: com.toString() })
+                });
+                const data = await res.json();
+                log("サーバー応答: " + JSON.stringify(data));
+                alert("登録成功！");
+            } catch (e) {
+                log("エラー: サーバーが寝ているかURLが違います");
+            }
+        }
+
+        // --- 2. ログイン (ZKP対話) ---
+        async function handleLogin() {
+            const user = document.getElementById('username').value;
+            const pass = document.getElementById('password').value;
+            const v = BigInt(pass.length); // 秘密の値
+            const r = 123n; // 固定値（本来はランダム）
+
+            log("ログイン開始...");
+
+            // (1) Commit: t = g^k * h^l (k,lはランダムだが今回は簡易化)
+            const k = 456n;
+            const l = 789n;
+            const t = (modPow(g, k, MOD) * modPow(h, l, MOD)) % MOD;
+
+            // (2) Challenge: サーバーにtを送り、eをもらう
+            const resChallenge = await fetch(`${SERVER_URL}/api/login/challenge`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, t: t.toString() })
+            });
+            const { e } = await resChallenge.json();
+            log(`チャレンジ受領 e: ${e}`);
+
+            // (3) Response: サーバーにs_v, s_rを送る
+            const s_v = k + BigInt(e) * v;
+            const s_r = l + BigInt(e) * r;
+
+            const resVerify = await fetch(`${SERVER_URL}/api/login/verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, s_v: s_v.toString(), s_r: s_r.toString() })
+            });
+            const { success } = await resVerify.json();
+
+            if (success) {
+                log("認証成功！ゼロ知識証明が完了しました。");
+                alert("ログイン成功！パスワードは送っていません。");
+            } else {
+                log("認証失敗...");
+            }
+        }
+    </script>
+</body>
+</html>
