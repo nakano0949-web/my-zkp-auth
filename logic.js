@@ -1,10 +1,10 @@
-// window. をつけて、どこからでも参照可能にする
 window.MOD = (2n ** 255n) - 19n;
 window.ORDER = window.MOD - 1n;
 window.g = 5n;
 window.h = 7n;
 
-function deriveVFromMoebius(password, saltBytes) {
+// メビウス変換で v と r を両方作る
+function deriveVAndR(password, saltBytes) {
     let a = 1n, b = 0n, c = 0n, d = 1n;
     const enc = new TextEncoder();
     const pwBytes = enc.encode(password);
@@ -21,21 +21,20 @@ function deriveVFromMoebius(password, saltBytes) {
     }
 
     for (const bit of bits) {
+        const na = (a + b) % window.MOD;
+        const nc = (c + d) % window.MOD;
         if (bit === 1) {
-            const na = (a + b) % window.MOD;
-            const nb = (2n * a + b) % window.MOD;
-            const nc = (c + d) % window.MOD;
-            const nd = (2n * c + d) % window.MOD;
-            a = na; b = nb; c = nc; d = nd;
+            a = na; b = (2n * a + b) % window.MOD;
+            c = nc; d = (2n * c + d) % window.MOD;
         } else {
-            const na = (a + b) % window.MOD;
-            const nb = b;
-            const nc = (c + d) % window.MOD;
-            const nd = d;
-            a = na; b = nb; c = nc; d = nd;
+            a = na; b = b;
+            c = nc; d = d;
         }
     }
-    return (a + b + c + d) % window.ORDER;
+    // v は前半の合計、r は後半の合計にする（これでパスワードから両方固定で作れる）
+    const v = (a + b) % window.ORDER;
+    const r = (c + d) % window.ORDER;
+    return { v, r };
 }
 
 function modPow(base, exp, mod) {
