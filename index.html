@@ -4,81 +4,86 @@
     <meta charset="UTF-8">
     <title>純粋 Möbius ZKP 認証</title>
     <script src="logic.js"></script>
-    <style>
-        body { font-family: sans-serif; padding: 20px; }
-        .log { background: #333; color: #0f0; padding: 10px; height: 200px; overflow-y: auto; font-family: monospace; }
-        button { padding: 10px; margin: 5px 0; width: 100%; cursor: pointer; }
-    </style>
 </head>
 <body>
     <h2>ハッシュゼロ・対話型ZKP</h2>
     <input type="text" id="user" placeholder="ユーザー名" style="width:100%; padding:8px; margin-bottom:10px;">
     <input type="password" id="pass" placeholder="パスワード" style="width:100%; padding:8px; margin-bottom:10px;">
     
-    <button onclick="doSignup()" style="background:#e1f5fe;">1. 登録</button>
-    <button onclick="doLogin()" style="background:#c8e6c9;">2. ZKP認証実行</button>
+    <button onclick="doSignup()">1. 登録</button>
+    <button onclick="doLogin()">2. ZKP認証実行</button>
 
-    <div class="log" id="log">ログがここに表示されます...</div>
+    <div id="log" style="background:#eee; padding:10px; margin-top:10px; min-height:100px; font-family:monospace;"></div>
 
     <script>
         const SERVER = "https://my-zkp-auth.onrender.com/api";
-        const salt = new Uint8Array([10, 20, 30, 40]); // 固定ソルト
+        const salt = new Uint8Array([10, 20, 30, 40]);
 
         function logger(m) { document.getElementById('log').innerHTML += `<br>> ${m}`; }
 
         async function doSignup() {
-            const user = document.getElementById('user').value;
-            const v = deriveVFromMoebius(document.getElementById('pass').value, salt);
-            const r = BigInt(Math.floor(Math.random() * 1000000000)); // 乱数r
-            
-            // 公開値 com = g^v * h^r
-            const com = (modPow(g, v, MOD) * modPow(h, r, MOD)) % MOD;
+            try {
+                const username = document.getElementById('user').value;
+                const password = document.getElementById('pass').value;
+                if(!username || !password) return alert("入力してください");
 
-            await fetch(`${SERVER}/signup`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ username: user, salt: "0a141e28", com: com.toString(), r: r.toString() })
-            });
-            logger(`登録完了: ${user} (com生成完了)`);
+                logger("計算中...");
+                const v = deriveVFromMoebius(password, salt);
+                const r = BigInt(Math.floor(Math.random() * 100000000));
+                
+                // logic.js の関数と定数を使用
+                const com = (modPow(window.g, v, window.MOD) * modPow(window.h, r, window.MOD)) % window.MOD;
+
+                logger("サーバーに送信中...");
+                const res = await fetch(`${SERVER}/signup`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        username: username, 
+                        salt: "0a141e28", 
+                        com: com.toString() 
+                    })
+                });
+                
+                if(res.ok) logger("登録成功！");
+                else logger("サーバーエラー");
+            } catch (e) {
+                logger("エラー発生: " + e.message);
+            }
         }
 
         async function doLogin() {
-            const user = document.getElementById('user').value;
-            const pass = document.getElementById('pass').value;
-            
-            // クライアント側で v を再計算
-            const v = deriveVFromMoebius(pass, salt);
-            
-            // 本来 r は登録時にクライアント側で保存しておくべきもの
-            // 今回は簡易化のため固定/DBから取得する形を想定
-            const r = 123456789n; // ※ここをsignup時のrと合わせる必要があります
+            // ログイン処理も同様に window. をつけて修正
+            try {
+                const user = document.getElementById('user').value;
+                const pass = document.getElementById('pass').value;
+                const v = deriveVFromMoebius(pass, salt);
+                const r = 123456789n; // デモ用固定値
 
-            // --- Step 1: Commitment (t) ---
-            const kv = BigInt(Math.floor(Math.random() * 1000000));
-            const kr = BigInt(Math.floor(Math.random() * 1000000));
-            const t = (modPow(g, kv, MOD) * modPow(h, kr, MOD)) % MOD;
+                const kv = BigInt(Math.floor(Math.random() * 1000000));
+                const kr = BigInt(Math.floor(Math.random() * 1000000));
+                const t = (modPow(window.g, kv, window.MOD) * modPow(window.h, kr, window.MOD)) % window.MOD;
 
-            // --- Step 2: Challenge (e) ---
-            const res = await fetch(`${SERVER}/login/challenge`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ username: user, t: t.toString() })
-            });
-            const { e } = await res.json();
-            logger(`チャレンジ受信: e=${e}`);
+                const res = await fetch(`${SERVER}/login/challenge`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username: user, t: t.toString() })
+                });
+                const { e } = await res.json();
 
-            // --- Step 3: Response (s_v, s_r) ---
-            const sv = (kv + BigInt(e) * v) % ORDER;
-            const sr = (kr + BigInt(e) * r) % ORDER;
+                const sv = (kv + BigInt(e) * v) % window.ORDER;
+                const sr = (kr + BigInt(e) * r) % window.ORDER;
 
-            // --- Step 4: Verify ---
-            const vres = await fetch(`${SERVER}/login/verify`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ username: user, s_v: sv.toString(), s_r: sr.toString() })
-            });
-            const { success } = await vres.json();
-            logger(success ? "認証成功！ (ZKP完了)" : "認証失敗 (パスワードが違います)");
+                const vres = await fetch(`${SERVER}/login/verify`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username: user, s_v: sv.toString(), s_r: sr.toString() })
+                });
+                const { success } = await vres.json();
+                logger(success ? "認証成功！" : "認証失敗");
+            } catch (e) {
+                logger("エラー: " + e.message);
+            }
         }
     </script>
 </body>
