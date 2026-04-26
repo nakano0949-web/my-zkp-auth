@@ -2,87 +2,152 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>純粋 Möbius ZKP 認証</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>純粋・対話型 Möbius ZKP 認証</title>
     <script src="logic.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 20px; line-height: 1.6; background-color: #f9f9f9; }
+        h1 { font-size: 1.5rem; color: #333; }
+        .section { border: 1px solid #ddd; padding: 15px; margin-top: 1em; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        label { display: block; margin-top: 10px; font-weight: bold; }
+        input { width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { margin-top: 15px; padding: 10px 15px; width: 100%; border: none; border-radius: 4px; color: white; cursor: pointer; font-weight: bold; }
+        .btn-signup { background-color: #007bff; }
+        .btn-login { background-color: #28a745; }
+        pre { background: #222; color: #0f0; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem; height: 200px; overflow-y: auto; }
+        .status-ok { color: #28a745; font-weight: bold; }
+        .status-ng { color: #dc3545; font-weight: bold; }
+    </style>
 </head>
 <body>
-    <h2>ハッシュゼロ・対話型ZKP</h2>
-    <input type="text" id="user" placeholder="ユーザー名" style="width:100%; padding:8px; margin-bottom:10px;">
-    <input type="password" id="pass" placeholder="パスワード" style="width:100%; padding:8px; margin-bottom:10px;">
-    
-    <button onclick="doSignup()">1. 登録</button>
-    <button onclick="doLogin()">2. ZKP認証実行</button>
 
-    <div id="log" style="background:#eee; padding:10px; margin-top:10px; min-height:100px; font-family:monospace;"></div>
+    <h1>Möbius ZKP 認証 (サーバー連携版)</h1>
+    <p>パスワードを一切送信せず、ハッシュ関数も使わない純粋な数学的証明。</p>
+
+    <div class="section">
+        <h2>[0] 登録 (Signup)</h2>
+        <label>ユーザー名: <input type="text" id="reg-user" value="alice"></label>
+        <label>パスワード: <input type="password" id="reg-pass" value="Möbius-Logic-2026"></label>
+        <button class="btn-signup" onclick="handleSignup()">サーバーへ登録する</button>
+        <pre id="reg-log">待機中...</pre>
+    </div>
+
+    <div class="section">
+        <h2>[1] 認証 (Login / ZKP)</h2>
+        <label>ユーザー名: <input type="text" id="login-user" value="alice"></label>
+        <label>パスワード: <input type="password" id="login-pass" value="Möbius-Logic-2026"></label>
+        <button class="btn-login" onclick="handleLogin()">ZK 認証を実行</button>
+        <pre id="login-log">待機中...</pre>
+    </div>
 
     <script>
-        const SERVER = "https://my-zkp-auth.onrender.com/api";
-        const salt = new Uint8Array([10, 20, 30, 40]);
+        // --- 設定 ---
+        const SERVER_URL = "https://my-zkp-auth.onrender.com/api";
 
-        function logger(m) { document.getElementById('log').innerHTML += `<br>> ${m}`; }
+        function log(id, msg) {
+            const el = document.getElementById(id);
+            el.innerText += "\n> " + msg;
+            el.scrollTop = el.scrollHeight;
+        }
 
-        async function doSignup() {
+        // --- [0] 登録処理 ---
+        async function handleSignup() {
+            const user = document.getElementById('reg-user').value.trim();
+            const pass = document.getElementById('reg-pass').value;
+            const display = 'reg-log';
+            document.getElementById(display).innerText = "登録開始...";
+
+            if (!user || !pass) return alert("入力してください");
+
             try {
-                const username = document.getElementById('user').value;
-                const password = document.getElementById('pass').value;
-                if(!username || !password) return alert("入力してください");
+                // 1. Saltの生成
+                const salt = crypto.getRandomValues(new Uint8Array(16));
+                const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
 
-                logger("計算中...");
-                const v = deriveVFromMoebius(password, salt);
-                const r = BigInt(Math.floor(Math.random() * 100000000));
+                // 2. Möbius変換による v の導出 (ハッシュゼロ)
+                const v = deriveVFromMoebius(pass, salt);
                 
-                // logic.js の関数と定数を使用
+                // 3. 乱数 r の生成 (提示コード通り、登録時に固定されるブラインド値)
+                const r = BigInt(Math.floor(Math.random() * 1000000000000)); 
+
+                // 4. 公開値 (南京錠) com = g^v * h^r mod MOD
                 const com = (modPow(window.g, v, window.MOD) * modPow(window.h, r, window.MOD)) % window.MOD;
 
-                logger("サーバーに送信中...");
-                const res = await fetch(`${SERVER}/signup`, {
+                log(display, "Möbius計算完了。サーバーへ送信します...");
+                
+                const res = await fetch(`${SERVER_URL}/signup`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ 
-                        username: username, 
-                        salt: "0a141e28", 
-                        com: com.toString() 
+                        username: user, 
+                        salt: saltHex, 
+                        com: com.toString(), 
+                        r: r.toString() 
                     })
                 });
-                
-                if(res.ok) logger("登録成功！");
-                else logger("サーバーエラー");
+
+                if (res.ok) log(display, "登録成功！サーバーに com と r が保存されました。");
+                else log(display, "登録失敗。サーバーエラー。");
+
             } catch (e) {
-                logger("エラー発生: " + e.message);
+                log(display, "エラー: " + e.message);
             }
         }
 
-        async function doLogin() {
-            // ログイン処理も同様に window. をつけて修正
-            try {
-                const user = document.getElementById('user').value;
-                const pass = document.getElementById('pass').value;
-                const v = deriveVFromMoebius(pass, salt);
-                const r = 123456789n; // デモ用固定値
+        // --- [1] 認証処理 (対話型) ---
+        async function handleLogin() {
+            const user = document.getElementById('login-user').value.trim();
+            const pass = document.getElementById('login-pass').value;
+            const display = 'login-log';
+            document.getElementById(display).innerText = "認証プロセス開始...";
 
-                const kv = BigInt(Math.floor(Math.random() * 1000000));
-                const kr = BigInt(Math.floor(Math.random() * 1000000));
+            try {
+                // Step 1: Commitment (目隠し)
+                log(display, "Step 1: クライアント側でコミットメント(t)を計算中...");
+                const kv = BigInt(Math.floor(Math.random() * 1000000000000));
+                const kr = BigInt(Math.floor(Math.random() * 1000000000000));
                 const t = (modPow(window.g, kv, window.MOD) * modPow(window.h, kr, window.MOD)) % window.MOD;
 
-                const res = await fetch(`${SERVER}/login/challenge`, {
+                // Step 2: Challenge (サーバーにtを送り、質問eと登録時のsalt, rをもらう)
+                log(display, "Step 2: サーバーへ t を送信し、チャレンジ(e)を要求...");
+                const resChallenge = await fetch(`${SERVER_URL}/login/challenge`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ username: user, t: t.toString() })
                 });
-                const { e } = await res.json();
+                
+                if (!resChallenge.ok) throw new Error("ユーザーが見つかりません。");
+                const { e, r, salt } = await resChallenge.json();
+                log(display, `チャレンジ受領 e: ${e.slice(0,10)}...`);
 
+                // Step 3: Response (回答作成)
+                log(display, "Step 3: 回答(s_v, s_r)を計算中...");
+                const saltBytes = new Uint8Array(salt.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+                const v = deriveVFromMoebius(pass, saltBytes);
+                
+                // s_v = kv + e*v,  s_r = kr + e*r (mod ORDER)
                 const sv = (kv + BigInt(e) * v) % window.ORDER;
-                const sr = (kr + BigInt(e) * r) % window.ORDER;
+                const sr = (kr + BigInt(e) * BigInt(r)) % window.ORDER;
 
-                const vres = await fetch(`${SERVER}/login/verify`, {
+                // Step 4: Verification (サーバーで最終検証)
+                log(display, "Step 4: サーバーで最終検証中...");
+                const resVerify = await fetch(`${SERVER_URL}/login/verify`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ username: user, s_v: sv.toString(), s_r: sr.toString() })
                 });
-                const { success } = await vres.json();
-                logger(success ? "認証成功！" : "認証失敗");
+                
+                const { success } = await resVerify.json();
+
+                if (success) {
+                    log(display, "認証成功！ゼロ知識証明が完了しました。");
+                    alert("ログイン成功！パスワードの知識を証明しました。");
+                } else {
+                    log(display, "認証失敗！パスワードが正しくありません。");
+                }
+
             } catch (e) {
-                logger("エラー: " + e.message);
+                log(display, "エラー: " + e.message);
             }
         }
     </script>
