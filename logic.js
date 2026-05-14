@@ -7,12 +7,9 @@ function deriveVFromMoebius(password, saltBytes) {
   let a = 1n, b = 0n, c = 0n, d = 1n;
   const enc = new TextEncoder();
   const pwBytes = enc.encode(password);
-  const combined = new Uint8Array(
-    saltBytes.length + usernameBytes.length + pwBytes.length
-);
-combined.set(saltBytes, 0);
-combined.set(usernameBytes, saltBytes.length);
-combined.set(pwBytes, saltBytes.length + usernameBytes.length);
+  const combined = new Uint8Array(saltBytes.length + pwBytes.length);
+  combined.set(saltBytes, 0);
+  combined.set(pwBytes, saltBytes.length);
 
   const bits = [];
   for (const byte of combined) {
